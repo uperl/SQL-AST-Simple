@@ -1,3 +1,6 @@
 SQL-AST-Simple-*
 /.build/
 *.swp
+/ffi/target/
+/ffi/_build/
+/ffi/Cargo.lock
