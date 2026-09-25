@@ -13,7 +13,7 @@ use Exporter qw( import );
 
 =head1 SYNOPSIS
 
- use SQL::AST::Simple qw( parse unparse );
+ use SQL::AST::Simple qw( parse unparse parse_expr unparse_expr );
 
  my $ast = parse('SELECT a, b FROM t WHERE a > 1', dialect => 'postgresql');
 
@@ -23,13 +23,18 @@ use Exporter qw( import );
 
  say unparse($ast);   # SELECT a, b FROM u WHERE a > 1
 
+ # Expressions can be handled on their own, without a statement around them:
+ $ast->[0]{Query}{body}{Select}{selection} = parse_expr('a > 1 AND b = 2');
+ say unparse_expr($ast->[0]{Query}{body}{Select}{selection});   # a > 1 AND b = 2
+
 =head1 DESCRIPTION
 
 This module provides Perl bindings for the Rust
 L<sqlparser|https://crates.io/crates/sqlparser> crate.  It
-exposes exactly two operations: turning SQL text into the parser's abstract
-syntax tree as an ordinary Perl data structure, and turning such a data
-structure back into SQL text.  There is no object layer; the tree is what
+exposes two operations: turning SQL text into the parser's abstract syntax
+tree as an ordinary Perl data structure, and turning such a data structure
+back into SQL text.  Each comes in a form for whole statements and a form
+for a lone expression.  There is no object layer; the tree is what
 the crate's serde serialization produces, decoded from JSON.  That keeps
 the module small and makes every node the crate knows about available
 without any wrapping, at the cost of a somewhat verbose structure.
@@ -63,6 +68,21 @@ C<teradata>.
 
 =back
 
+=head2 parse_expr
+
+ my $expr = parse_expr($sql);
+ my $expr = parse_expr($sql, dialect => $name);
+
+Parses C<$sql> as a single expression, such as the condition of a C<WHERE>
+clause, and returns it as a hash reference.  The whole of C<$sql> must be
+consumed by the expression; a leading C<WHERE> keyword or anything left
+over after the expression is an error.  Takes the same C<dialect> option
+as L</parse>.
+
+The result is exactly what appears inside a statement wherever the crate
+expects an expression, so it can be spliced into a tree from L</parse>,
+for instance as the C<selection> of a C<SELECT>.
+
 =head2 unparse
 
  my $sql = unparse($ast);
@@ -83,6 +103,15 @@ If true, statements are formatted with indentation and newlines rather
 than on a single line, and are joined with C<";\n">.
 
 =back
+
+=head2 unparse_expr
+
+ my $sql = unparse_expr($expr);
+
+Takes an expression hash reference, as returned by L</parse_expr> or
+lifted out of a statement, and returns the SQL text.  Throws an exception
+if the structure does not deserialize into a valid expression.  There is
+no C<pretty> option; expressions are always rendered on one line.
 
 =head1 THE DATA STRUCTURE
 
@@ -123,8 +152,8 @@ first.
 Most nodes carry a C<span> hash recording where they appeared in the
 source.  L</unparse> ignores the contents but requires the field to be
 present, so the easiest way to build a new node is to parse a small
-snippet and lift the piece you need out of the result, rather than
-constructing hashes by hand.
+snippet (with L</parse_expr> for an expression) and lift the piece you
+need out of the result, rather than constructing hashes by hand.
 
 =back
 
@@ -157,7 +186,7 @@ The parser this module wraps.
 
 =cut
 
-our @EXPORT_OK = qw( parse unparse );
+our @EXPORT_OK = qw( parse unparse parse_expr unparse_expr );
 
 my $ffi = FFI::Platypus->new(
     api => 2,
@@ -168,9 +197,11 @@ $ffi->bundle;
 
 my $json = JSON::MaybeXS->new( utf8 => 1 );
 
-$ffi->attach( _free    => ['opaque']                      => 'void'   );
-$ffi->attach( _parse   => ['string', 'string', 'opaque*'] => 'opaque' );
-$ffi->attach( _unparse => ['string', 'bool',   'opaque*'] => 'opaque' );
+$ffi->attach( _free         => ['opaque']                      => 'void'   );
+$ffi->attach( _parse        => ['string', 'string', 'opaque*'] => 'opaque' );
+$ffi->attach( _parse_expr   => ['string', 'string', 'opaque*'] => 'opaque' );
+$ffi->attach( _unparse      => ['string', 'bool',   'opaque*'] => 'opaque' );
+$ffi->attach( _unparse_expr => ['string',           'opaque*'] => 'opaque' );
 
 # Copy a Rust allocated C string into a Perl byte string and release it.
 sub _take ($ptr) {
@@ -190,12 +221,20 @@ sub _call ($xsub, @args) {
     return _take($ptr);
 }
 
-sub parse ($sql, %opt) {
+sub _parse_with ($xsub, $sql, %opt) {
     my $dialect = delete $opt{dialect} // 'generic';
     croak("unknown options: @{[ sort keys %opt ]}") if %opt;
     croak("sql must be defined") unless defined $sql;
     utf8::encode($sql);
-    return $json->decode(_call(\&_parse, $dialect, $sql));
+    return $json->decode(_call($xsub, $dialect, $sql));
+}
+
+sub parse ($sql, %opt) {
+    return _parse_with(\&_parse, $sql, %opt);
+}
+
+sub parse_expr ($sql, %opt) {
+    return _parse_with(\&_parse_expr, $sql, %opt);
 }
 
 sub unparse ($ast, %opt) {
@@ -204,6 +243,14 @@ sub unparse ($ast, %opt) {
     $ast = [$ast] if is_plain_hashref $ast;
     croak("ast must be an array or hash reference") unless is_plain_arrayref $ast;
     my $sql = _call(\&_unparse, $json->encode($ast), !!$pretty);
+    utf8::decode($sql);
+    return $sql;
+}
+
+sub unparse_expr ($expr, %opt) {
+    croak("unknown options: @{[ sort keys %opt ]}") if %opt;
+    croak("expr must be a hash reference") unless is_plain_hashref $expr;
+    my $sql = _call(\&_unparse_expr, $json->encode($expr));
     utf8::decode($sql);
     return $sql;
 }

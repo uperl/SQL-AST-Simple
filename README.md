@@ -5,7 +5,7 @@ Parse SQL into a plain Perl data structure and back again
 # SYNOPSIS
 
 ```perl
-use SQL::AST::Simple qw( parse unparse );
+use SQL::AST::Simple qw( parse unparse parse_expr unparse_expr );
 
 my $ast = parse('SELECT a, b FROM t WHERE a > 1', dialect => 'postgresql');
 
@@ -14,15 +14,20 @@ my $ast = parse('SELECT a, b FROM t WHERE a > 1', dialect => 'postgresql');
 $ast->[0]{Query}{body}{Select}{from}[0]{relation}{Table}{name}[0]{Identifier}{value} = 'u';
 
 say unparse($ast);   # SELECT a, b FROM u WHERE a > 1
+
+# Expressions can be handled on their own, without a statement around them:
+$ast->[0]{Query}{body}{Select}{selection} = parse_expr('a > 1 AND b = 2');
+say unparse_expr($ast->[0]{Query}{body}{Select}{selection});   # a > 1 AND b = 2
 ```
 
 # DESCRIPTION
 
 This module provides Perl bindings for the Rust
 [sqlparser](https://crates.io/crates/sqlparser) crate.  It
-exposes exactly two operations: turning SQL text into the parser's abstract
-syntax tree as an ordinary Perl data structure, and turning such a data
-structure back into SQL text.  There is no object layer; the tree is what
+exposes two operations: turning SQL text into the parser's abstract syntax
+tree as an ordinary Perl data structure, and turning such a data structure
+back into SQL text.  Each comes in a form for whole statements and a form
+for a lone expression.  There is no object layer; the tree is what
 the crate's serde serialization produces, decoded from JSON.  That keeps
 the module small and makes every node the crate knows about available
 without any wrapping, at the cost of a somewhat verbose structure.
@@ -54,6 +59,23 @@ Options:
     `duckdb`, `databricks`, `hive`, `spark` (or `sparksql`) and
     `teradata`.
 
+## parse\_expr
+
+```perl
+my $expr = parse_expr($sql);
+my $expr = parse_expr($sql, dialect => $name);
+```
+
+Parses `$sql` as a single expression, such as the condition of a `WHERE`
+clause, and returns it as a hash reference.  The whole of `$sql` must be
+consumed by the expression; a leading `WHERE` keyword or anything left
+over after the expression is an error.  Takes the same `dialect` option
+as ["parse"](#parse).
+
+The result is exactly what appears inside a statement wherever the crate
+expects an expression, so it can be spliced into a tree from ["parse"](#parse),
+for instance as the `selection` of a `SELECT`.
+
 ## unparse
 
 ```perl
@@ -72,6 +94,17 @@ Options:
 
     If true, statements are formatted with indentation and newlines rather
     than on a single line, and are joined with `";\n"`.
+
+## unparse\_expr
+
+```perl
+my $sql = unparse_expr($expr);
+```
+
+Takes an expression hash reference, as returned by ["parse\_expr"](#parse_expr) or
+lifted out of a statement, and returns the SQL text.  Throws an exception
+if the structure does not deserialize into a valid expression.  There is
+no `pretty` option; expressions are always rendered on one line.
 
 # THE DATA STRUCTURE
 
@@ -96,8 +129,8 @@ first.
 - Most nodes carry a `span` hash recording where they appeared in the
 source.  ["unparse"](#unparse) ignores the contents but requires the field to be
 present, so the easiest way to build a new node is to parse a small
-snippet and lift the piece you need out of the result, rather than
-constructing hashes by hand.
+snippet (with ["parse\_expr"](#parse_expr) for an expression) and lift the piece you
+need out of the result, rather than constructing hashes by hand.
 
 The easiest way to learn the shape for a given construct is to parse an
 example and dump it.  The exact shape depends on the version of the
