@@ -18,8 +18,8 @@ say unparse($ast);   # SELECT a, b FROM u WHERE a > 1
 
 # DESCRIPTION
 
-This module bundles the Rust
-[sqlparser](https://github.com/apache/datafusion-sqlparser-rs) crate and
+This module provides Perl bindings for the Rust
+[sqlparser](https://crates.io/crates/sqlparser) crate.  It
 exposes exactly two operations: turning SQL text into the parser's abstract
 syntax tree as an ordinary Perl data structure, and turning such a data
 structure back into SQL text.  There is no object layer; the tree is what
@@ -100,10 +100,10 @@ snippet and lift the piece you need out of the result, rather than
 constructing hashes by hand.
 
 The easiest way to learn the shape for a given construct is to parse an
-example and dump it.  The exact shape depends on the bundled crate
-version, which is pinned in the distribution's `ffi/Cargo.toml`; a
-release that bumps it may change the structure and will say so in the
-change log.
+example and dump it.  The exact shape depends on the version of the
+crate the bindings are built against, which is pinned in the
+distribution's `ffi/Cargo.toml`; a release that bumps it may change the
+structure and will say so in the change log.
 
 # CAVEATS
 
@@ -118,13 +118,9 @@ install time.
 
 # SEE ALSO
 
-- [https://github.com/apache/datafusion-sqlparser-rs](https://github.com/apache/datafusion-sqlparser-rs)
+- [https://crates.io/crates/sqlparser](https://crates.io/crates/sqlparser)
 
     The parser this module wraps.
-
-- [FFI::Platypus::Lang::Rust](https://metacpan.org/pod/FFI::Platypus::Lang::Rust)
-
-    How the Rust code is bundled and called.
 
 # AUTHOR
 
