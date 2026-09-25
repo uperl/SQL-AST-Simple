@@ -1,5 +1,5 @@
 use Test2::V0 -no_srand => 1;
-use SQL::AST::Simple qw( parse unparse );
+use SQL::AST::Simple qw( parse unparse parse_expr unparse_expr );
 
 subtest 'round trip' => sub {
     my $sql = 'SELECT a, b, 123, myfunc(b) FROM table_1 WHERE a > b AND b < 100 ORDER BY a DESC, b';
@@ -50,6 +50,28 @@ subtest 'unicode' => sub {
     is $ast->[0]{Query}{body}{Select}{from}[0]{relation}{Table}{name}[0]{Identifier}{value},
         "t\x{e4}ble", 'identifier decoded as characters';
     is unparse($ast), $sql, 'round trip preserves wide characters';
+};
+
+subtest 'expressions' => sub {
+    my $expr = parse_expr("a > 1 AND b = 'x'");
+    is $expr, hash { field BinaryOp => hash { etc }; end }, 'BinaryOp node';
+    is unparse_expr($expr), "a > 1 AND b = 'x'", 'round trip';
+
+    my $ast = parse('SELECT a FROM t');
+    $ast->[0]{Query}{body}{Select}{selection} = $expr;
+    is unparse($ast), "SELECT a FROM t WHERE a > 1 AND b = 'x'", 'spliced into a statement';
+    is unparse_expr(parse('SELECT 1 WHERE c < 2')->[0]{Query}{body}{Select}{selection}), 'c < 2', 'lifted out of a statement';
+
+    is unparse_expr(parse_expr('a::int', dialect => 'postgresql')), 'a::INT', 'dialect option';
+    is unparse_expr(parse_expr("'h\x{e9}llo'")), "'h\x{e9}llo'", 'unicode';
+
+    like dies { parse_expr('a > 1 foo') }, qr/Expected: EOF, found: foo at Line: 1, Column: 7/, 'trailing tokens';
+    like dies { parse_expr('') }, qr/Expected: an expression/, 'empty';
+    like dies { parse_expr(undef) }, qr/sql must be defined/, 'undef sql';
+    like dies { parse_expr('a', foo => 1) }, qr/unknown options: foo/, 'bad parse_expr option';
+    like dies { unparse_expr({ Bogus => 1 }) }, qr/unknown variant/, 'invalid expr';
+    like dies { unparse_expr([]) }, qr/must be a hash reference/, 'not a hash reference';
+    like dies { unparse_expr({}, pretty => 1) }, qr/unknown options: pretty/, 'bad unparse_expr option';
 };
 
 subtest 'errors' => sub {

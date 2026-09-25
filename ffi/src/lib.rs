@@ -5,9 +5,10 @@
 //! returned to the caller is a NUL terminated, heap allocated C string that
 //! must be released with `sql_ast_simple_free`.
 
-use sqlparser::ast::Statement;
-use sqlparser::dialect::dialect_from_str;
+use sqlparser::ast::{Expr, Statement};
+use sqlparser::dialect::{dialect_from_str, Dialect};
 use sqlparser::parser::Parser;
+use sqlparser::tokenizer::Token;
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 
@@ -45,6 +46,12 @@ fn finish(err_out: *mut *mut c_char, result: Result<String, String>) -> *mut c_c
     }
 }
 
+/// Look up a dialect by name.
+fn dialect(name: *const c_char) -> Result<Box<dyn Dialect>, String> {
+    let name = unsafe { borrow(name) }?;
+    dialect_from_str(name).ok_or_else(|| format!("unknown dialect: {name}"))
+}
+
 /// Parse `sql` using the named dialect and return the AST as a JSON array
 /// of statements.
 #[no_mangle]
@@ -54,12 +61,34 @@ pub extern "C" fn sql_ast_simple_parse(
     err_out: *mut *mut c_char,
 ) -> *mut c_char {
     let result = (|| {
-        let dialect_name = unsafe { borrow(dialect) }?;
+        let dialect = self::dialect(dialect)?;
         let sql = unsafe { borrow(sql) }?;
-        let dialect =
-            dialect_from_str(dialect_name).ok_or_else(|| format!("unknown dialect: {dialect_name}"))?;
         let ast = Parser::parse_sql(&*dialect, sql).map_err(|e| e.to_string())?;
         serde_json::to_string(&ast).map_err(|e| e.to_string())
+    })();
+    finish(err_out, result)
+}
+
+/// Parse `sql` as a single expression, such as the body of a `WHERE`
+/// clause, and return it as JSON.  Anything left over after the expression
+/// is an error.
+#[no_mangle]
+pub extern "C" fn sql_ast_simple_parse_expr(
+    dialect: *const c_char,
+    sql: *const c_char,
+    err_out: *mut *mut c_char,
+) -> *mut c_char {
+    let result = (|| {
+        let dialect = self::dialect(dialect)?;
+        let sql = unsafe { borrow(sql) }?;
+        let mut parser = Parser::new(&*dialect)
+            .try_with_sql(sql)
+            .map_err(|e| e.to_string())?;
+        let expr = parser.parse_expr().map_err(|e| e.to_string())?;
+        parser
+            .expect_token(&Token::EOF)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&expr).map_err(|e| e.to_string())
     })();
     finish(err_out, result)
 }
@@ -81,6 +110,21 @@ pub extern "C" fn sql_ast_simple_unparse(
             .map(|s| if pretty { format!("{s:#}") } else { s.to_string() })
             .collect();
         Ok(parts.join(if pretty { ";\n" } else { "; " }))
+    })();
+    finish(err_out, result)
+}
+
+/// Turn a JSON expression (as produced by `sql_ast_simple_parse_expr`,
+/// possibly modified) back into SQL text.
+#[no_mangle]
+pub extern "C" fn sql_ast_simple_unparse_expr(
+    json: *const c_char,
+    err_out: *mut *mut c_char,
+) -> *mut c_char {
+    let result = (|| {
+        let json = unsafe { borrow(json) }?;
+        let expr: Expr = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        Ok(expr.to_string())
     })();
     finish(err_out, result)
 }
