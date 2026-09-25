@@ -4,7 +4,8 @@ use 5.042;
 use warnings;
 use FFI::Platypus 2.00;
 use JSON::MaybeXS ();
-use Carp ();
+use Carp qw( croak );
+use Ref::Util qw( is_plain_arrayref is_plain_hashref );
 use Exporter qw( import );
 
 # ABSTRACT: Parse SQL into a plain Perl data structure and back again
@@ -184,24 +185,24 @@ sub _call ($xsub, @args) {
     unless(defined $ptr) {
         my $msg = defined $err ? _take($err) : 'unknown error';
         utf8::decode($msg);
-        Carp::croak($msg);
+        croak($msg);
     }
     return _take($ptr);
 }
 
 sub parse ($sql, %opt) {
     my $dialect = delete $opt{dialect} // 'generic';
-    Carp::croak("unknown options: @{[ sort keys %opt ]}") if %opt;
-    Carp::croak("sql must be defined") unless defined $sql;
+    croak("unknown options: @{[ sort keys %opt ]}") if %opt;
+    croak("sql must be defined") unless defined $sql;
     utf8::encode($sql);
     return $json->decode(_call(\&_parse, $dialect, $sql));
 }
 
 sub unparse ($ast, %opt) {
     my $pretty = delete $opt{pretty} // 0;
-    Carp::croak("unknown options: @{[ sort keys %opt ]}") if %opt;
-    $ast = [$ast] if ref $ast eq 'HASH';
-    Carp::croak("ast must be an array or hash reference") unless ref $ast eq 'ARRAY';
+    croak("unknown options: @{[ sort keys %opt ]}") if %opt;
+    $ast = [$ast] if is_plain_hashref $ast;
+    croak("ast must be an array or hash reference") unless is_plain_arrayref $ast;
     my $sql = _call(\&_unparse, $json->encode($ast), !!$pretty);
     utf8::decode($sql);
     return $sql;
