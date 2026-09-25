@@ -1,7 +1,11 @@
+package SQL::AST::Simple;
+
+use 5.042;
 use warnings;
-use v5.42;
+use FFI::Platypus 2.00;
 
-package SQL::AST::Simple {
-
-    # ABSTRACT: Round trip parser and AST for SQL
-}
+my $ffi = FFI::Platypus->new(
+    api => 2,
+    lang => 'Rust',
+);
+$ffi->bundle;
